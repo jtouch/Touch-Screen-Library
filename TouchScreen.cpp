@@ -11,10 +11,17 @@
 // increase or decrease the touchscreen oversampling. This is a little different than you make think:
 // 1 is no oversampling, whatever data we get is immediately returned
 // 2 is double-sampling and we only return valid data if both points are the same
+//	NOTE: this doesn't work on Due; use 3
 // 3+ uses insert sort to get the median value.
 // We found 2 is precise yet not too slow so we suggest sticking with it!
 
-#define NUMSAMPLES 2
+#define NUMSAMPLES 3
+
+// Run output in regular (digitalWrite) or optimized (portOutputRegister) mode
+//    0 = regular
+//    >0 = optimized (NB: does not work, and doesn't seem needed on the Due)
+
+#define TSFASTMODE 0
 
 TSPoint::TSPoint(void) {
   x = y = 0;
@@ -54,6 +61,7 @@ TSPoint TouchScreen::getPoint(void) {
   uint8_t i, valid;
   
 
+#if TSFASTMODE > 0
   uint8_t xp_port = digitalPinToPort(_xp);
   uint8_t yp_port = digitalPinToPort(_yp);
   uint8_t xm_port = digitalPinToPort(_xm);
@@ -63,24 +71,38 @@ TSPoint TouchScreen::getPoint(void) {
   uint8_t yp_pin = digitalPinToBitMask(_yp);
   uint8_t xm_pin = digitalPinToBitMask(_xm);
   uint8_t ym_pin = digitalPinToBitMask(_ym);
+#endif
 
 
   valid = 1;
 
+// Setup to read X:
+//   yp = input & analog sampled 
+//   xm = LOW
+//   ym = input
+//   xp = HIGH
+
   pinMode(_yp, INPUT);
   pinMode(_ym, INPUT);
   
+  // turn of input pull-ups
+#if TSFASTMODE > 0
   *portOutputRegister(yp_port) &= ~yp_pin;
   *portOutputRegister(ym_port) &= ~ym_pin;
-  //digitalWrite(_yp, LOW);
-  //digitalWrite(_ym, LOW);
+#else
+  digitalWrite(_yp, LOW);
+  digitalWrite(_ym, LOW);
+#endif
    
   pinMode(_xp, OUTPUT);
   pinMode(_xm, OUTPUT);
-  //digitalWrite(_xp, HIGH);
-  //digitalWrite(_xm, LOW);
+#if TSFASTMODE > 0
   *portOutputRegister(xp_port) |= xp_pin;
   *portOutputRegister(xm_port) &= ~xm_pin;
+#else
+  digitalWrite(_xp, HIGH);
+  digitalWrite(_xm, LOW);
+#endif
    
    for (i=0; i<NUMSAMPLES; i++) {
      samples[i] = analogRead(_yp);
@@ -93,15 +115,33 @@ TSPoint TouchScreen::getPoint(void) {
 #endif
    x = (1023-samples[NUMSAMPLES/2]);
 
+// Setup to read Y:
+//   yp = HIGH
+//   xm = input & analog sampled 
+//   ym = LOW
+//   xp = input
+
    pinMode(_xp, INPUT);
    pinMode(_xm, INPUT);
+
+  // turn of input pull-ups
+#if TSFASTMODE > 0
    *portOutputRegister(xp_port) &= ~xp_pin;
-   //digitalWrite(_xp, LOW);
+   *portOutputRegister(xm_port) &= ~xm_pin;
+#else
+   digitalWrite(_xp, LOW);
+   digitalWrite(_xm, LOW);
+#endif
    
    pinMode(_yp, OUTPUT);
-   *portOutputRegister(yp_port) |= yp_pin;
-   //digitalWrite(_yp, HIGH);
    pinMode(_ym, OUTPUT);
+#if TSFASTMODE > 0
+   *portOutputRegister(yp_port) |= yp_pin;
+   *portOutputRegister(ym_port) &= ~ym_pin;
+#else
+   digitalWrite(_yp, HIGH);
+   digitalWrite(_ym, LOW);
+#endif
   
    for (i=0; i<NUMSAMPLES; i++) {
      samples[i] = analogRead(_xm);
@@ -116,19 +156,34 @@ TSPoint TouchScreen::getPoint(void) {
 
    y = (1023-samples[NUMSAMPLES/2]);
 
+// Setup to read Z:
+//   yp = input & analog sampled
+//   xm = input & analog sampled
+//   ym = HIGH
+//   xp = LOW
+
    // Set X+ to ground
-   pinMode(_xp, OUTPUT);
-   *portOutputRegister(xp_port) &= ~xp_pin;
-   //digitalWrite(_xp, LOW);
-  
    // Set Y- to VCC
+   pinMode(_xp, OUTPUT);
+#if TSFASTMODE > 0
+   *portOutputRegister(xp_port) &= ~xp_pin;
    *portOutputRegister(ym_port) |= ym_pin;
-   //digitalWrite(_ym, HIGH); 
+#else
+   digitalWrite(_xp, LOW);
+   digitalWrite(_ym, HIGH); 
+#endif
   
+   // turn of input pull-ups
    // Hi-Z X- and Y+
-   *portOutputRegister(yp_port) &= ~yp_pin;
-   //digitalWrite(_yp, LOW);
+   pinMode(_xm, INPUT);
    pinMode(_yp, INPUT);
+#if TSFASTMODE > 0
+   *portOutputRegister(xm_port) &= ~xm_pin;
+   *portOutputRegister(yp_port) &= ~yp_pin;
+#else
+   digitalWrite(_xm, LOW);
+   digitalWrite(_yp, LOW);
+#endif
   
    int z1 = analogRead(_xm); 
    int z2 = analogRead(_yp);
